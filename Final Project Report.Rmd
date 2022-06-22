@@ -2,22 +2,14 @@
 title: "Capstone Project Final Report"
 author: "Craig Leavitt"
 date: "`r Sys.Date()`"
-fontsize: 12pt
-output:  
+output: 
   pdf_document: 
-    df_print: kable
-    template: default
-    toc_depth: 2
-    fig_crop: no
-    highlight: null
-editor_options: 
-  chunk_output_type: console
-header-includes:
-  \usepackage{longtable}
+    fig_width: 8
+    fig_height: 7
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # 1. Introduction
@@ -108,3 +100,256 @@ test_index <- createDataPartition(y = migraines$Type, times = 1, p = 0.2, list =
 test_set <- migraines[test_index,]
 train_set <- migraines[-test_index,]
 ```
+
+<br />
+Test Data Characteristics:
+
+```{r, echo=FALSE}
+summary(test_set$Type)
+new_margins <- c(12, 2.5, 2.5, 2.5)
+par(mar = new_margins)
+barplot(table(test_set$Type), main="Label Dist. of Migraines Test Dataset", ylab="Frequency", las=3)
+```
+
+\newpage
+Train Dataset Characteristics:
+
+```{r, echo=FALSE}
+summary(train_set$Type)
+new_margins <- c(12, 2.5, 2.5, 2.5)
+par(mar = new_margins)
+barplot(table(train_set$Type), main="Label Dist. of Migraines Train Dataset", ylab="Frequency", las=3)
+```
+\newpage
+
+There is an imbalance in the class labels which could lead to model training issues, the training dataset will be rebalanced by resampling from the smaller label classes. A number of different sample sizes were tried and the best performance among the models was obtained by trialing the sample sizes on an RF model.
+
+```{r, include=FALSE}
+test_set <- test_set %>% ungroup()
+train_set <- train_set %>% ungroup()
+
+indep_var = colnames(train_set) != "Type"
+control <- trainControl(method="cv", number=10, p=0.9)
+
+resample <- function(sample_size){
+  Type_1 <- train_set %>% filter(Type=="Basilar-type aura") %>% sample_n(sample_size, replace=TRUE)
+  Type_2 <- train_set %>% filter(Type=="Familial hemiplegic migraine") %>% sample_n(sample_size, replace=TRUE)
+  Type_3 <- train_set %>% filter(Type=="Migraine without aura") %>% sample_n(sample_size, replace=TRUE)
+  Type_4 <- train_set %>% filter(Type=="Other") %>% sample_n(sample_size, replace=TRUE)
+  Type_5 <- train_set %>% filter(Type=="Sporadic hemiplegic migraine") %>% sample_n(sample_size, replace=TRUE)
+  Type_6 <- train_set %>% filter(Type=="Typical aura with migraine")
+  Type_7 <- train_set %>% filter(Type=="Typical aura without migraine") %>% sample_n(sample_size, replace=TRUE)
+  bind_rows(Type_1, Type_2, Type_3, Type_4, Type_5, Type_6, Type_7)
+}
+#Check optimal sample size
+n <- seq(27,197,10)
+size_acc_check <- function(n){
+  bal_train <- resample(n)
+  grid <- data.frame(mtry=10)
+  model_bal_rf = train(x = bal_train[indep_var], y = bal_train$Type, method = 'rf', trControl=control, tuneGrid = grid)
+  c(n, model_bal_rf$results$Accuracy)
+}
+samp_acc <- sapply(n,size_acc_check)
+```
+```{r, echo=FALSE}
+new_margins <- c(4, 2.5, 2.5, 2.5)
+par(mar = new_margins)
+plot(samp_acc[1,], samp_acc[2,], xlab="Sample Size", ylab="Accurary", main="Sample Size vs Accurary (RF) on Training Set")
+sample_size <- samp_acc[1,which.max(samp_acc[2,])]
+
+#Need to balance the classes for the training dataset using resampling
+bal_train <- resample(sample_size)
+new_margins <- c(12, 2.5, 2.5, 2.5)
+par(mar = new_margins)
+barplot(table(bal_train$Type), main="Label Distri. of Balanced Training Set", ylab="Frequency", las=3)
+```
+\newpage
+
+# 2. Modeling and Analysis
+
+All models show below use 10 crossfold validation with a 0.9 probability. All models were separately tuned on the training set, then tested against the holdout set for F1, and overall accuracy. Detailed results are given for each model.
+
+## 2.1 _Random Forest_
+
+```{r, include=FALSE}
+############# Random Forest ############# 
+grid <- data.frame(mtry=seq(2,24,2))
+model_bal_rf = train(x = bal_train[indep_var], y = bal_train$Type, method = 'rf', trControl=control, tuneGrid = grid)
+```
+```{r, echo=FALSE}
+varImp(model_bal_rf)
+ggplot(model_bal_rf) + labs(title="RF Model Tuning")
+y_hat_bal <- predict(model_bal_rf, test_set[indep_var])
+```
+
+<br /> Test Set Accuracy and Overall F1 Score:
+
+```{r, echo=FALSE}
+#Overall Acuracy
+acc_rf <- confusionMatrix(y_hat_bal, as.factor(test_set$Type))$overall[["Accuracy"]]
+acc_rf
+#Mean F1 score all classes
+F1_rf <- mean(as_tibble(confusionMatrix(y_hat_bal, as.factor(test_set$Type))$byClass)$F1)
+F1_rf
+```
+
+<br /> Detailed Test Set Results 
+
+```{r, echo=FALSE}
+#Detailed results by class
+confusionMatrix(y_hat_bal, as.factor(test_set$Type), mode="everything")$byClass
+```
+\newpage
+
+## 2.2 _KNN_
+
+```{r, include=FALSE}
+############# knn ############# 
+grid <- data.frame(k=seq(3,13,2))
+model_bal_knn = train(x = bal_train[indep_var], y = bal_train$Type, method = 'knn', trControl=control, tuneGrid = grid)
+```
+```{r, echo=FALSE}
+ggplot(model_bal_knn) + labs(title="KNN Model Tuning")
+
+y_hat_bal <- predict(model_bal_knn, test_set[indep_var])
+```
+
+<br /> Test Set Accuracy and Overall F1 Score:
+
+```{r, echo=FALSE}
+#Overall Acuracy
+acc_knn <- confusionMatrix(y_hat_bal, as.factor(test_set$Type))$overall[["Accuracy"]]
+acc_knn
+#Mean F1 score all classes
+F1_knn <- mean(as_tibble(confusionMatrix(y_hat_bal, as.factor(test_set$Type))$byClass)$F1)
+F1_knn
+```
+
+<br /> Detailed Test Set Results 
+
+```{r, echo=FALSE}
+#Detailed results by class
+confusionMatrix(y_hat_bal, as.factor(test_set$Type), mode="everything")$byClass
+```
+\newpage
+
+## 2.3 _PDA_
+
+```{r, include=FALSE}
+############# PDA2 ############# 
+grid <- data.frame(df=seq(1,21,2))
+model_bal_pda = train(x = bal_train[indep_var], y = bal_train$Type, method = 'pda2', trControl=control, tuneGrid = grid)
+```
+```{r, echo=FALSE}
+ggplot(model_bal_pda) + labs(title="PDA Model Tuning")
+
+y_hat_bal <- predict(model_bal_pda, test_set[indep_var])
+```
+
+<br /> Test Set Accuracy and Overall F1 Score:
+
+```{r, echo=FALSE}
+#Overall Acuracy
+acc_pda <- confusionMatrix(y_hat_bal, as.factor(test_set$Type))$overall[["Accuracy"]]
+acc_pda
+#Mean F1 score all classes
+F1_pda <- mean(as_tibble(confusionMatrix(y_hat_bal, as.factor(test_set$Type))$byClass)$F1)
+F1_pda
+```
+<br /> Detailed Test Set Results 
+```{r, echo=FALSE}
+#Detailed results by class
+confusionMatrix(y_hat_bal, as.factor(test_set$Type), mode="everything")$byClass
+```
+\newpage
+
+## 2.4 _RDA_
+
+```{r, include=FALSE}
+############# RDA ############# 
+grid <- expand.grid(gamma=c(0.01, 0.001, 0.0001, 0.00001), lambda=seq(0.01, 0.1, 0.01))
+model_bal_rda = train(x = bal_train[indep_var], y = bal_train$Type, method = 'rda', trControl=control, tuneGrid = grid)
+```
+```{r, echo=FALSE}
+ggplot(model_bal_rda) + labs(title="RDA Model Tuning")
+
+y_hat_bal <- predict(model_bal_rda, test_set[indep_var])
+#Overall Acuracy
+acc_rda <- confusionMatrix(y_hat_bal, as.factor(test_set$Type))$overall[["Accuracy"]]
+#Mean F1 score all classes
+F1_rda <- mean(as_tibble(confusionMatrix(y_hat_bal, as.factor(test_set$Type))$byClass)$F1)
+F1_rda
+```
+
+<br /> Detailed Test Set Results 
+
+```{r, echo=FALSE}
+#Detailed results by class
+confusionMatrix(y_hat_bal, as.factor(test_set$Type), mode="everything")$byClass
+```
+\newpage
+
+## 2.5 _CIRF_
+
+```{r, include=FALSE}
+############# CIRF ############# 
+grid <- data.frame(mtry=seq(4,14,2))
+model_bal_cirf = train(x = bal_train[indep_var], y = bal_train$Type, method = 'cforest', trControl=control,tuneGrid = grid)
+```
+```{r, echo=FALSE}
+varImp(model_bal_cirf)
+ggplot(model_bal_cirf) + labs(title="CIRF Model Tuning")
+
+y_hat_bal <- predict(model_bal_cirf, test_set[indep_var])
+```
+```{r, echo=FALSE}
+#Overall Acuracy
+acc_cirf <- confusionMatrix(y_hat_bal, as.factor(test_set$Type))$overall[["Accuracy"]]
+```
+<br /> Test Set Accuracy and Overall F1 Score:
+```{r, echo=FALSE}
+acc_cirf
+#Mean F1 score all classes
+F1_cirf <- mean(as_tibble(confusionMatrix(y_hat_bal, as.factor(test_set$Type))$byClass)$F1)
+F1_cirf 
+```
+<br /> Detailed Test Set Results 
+```{r, echo=FALSE}
+#Detailed results by class
+confusionMatrix(y_hat_bal, as.factor(test_set$Type), mode="everything")$byClass
+```
+\newpage
+
+# 3. Results
+
+After fitting several different classification models, and tuning the parameters of each model. The best accuracies of each model are summarized below. It is a virtual tie between RDA and RF. RF generally was able to attain a higher overall accuracy with RDA attaining a higher average F1 score.
+
+The RF and CIRF models each had different variable importance rankings. This may help to explain the difference between the model results.
+
+```{r, echo=FALSE}
+#Comparison of final models
+resamps <- resamples(list(RF = model_bal_rf,
+                          KNN = model_bal_knn,
+                          PDA = model_bal_pda,
+                          RDA = model_bal_rda,
+                          CIRF = model_bal_cirf))
+
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col = rgb(.2, .2, .2, .4)
+theme1$plot.symbol$pch = 16
+theme1$plot.line$col = rgb(1, 0, 0, .7)
+theme1$plot.line$lwd <- 2
+trellis.par.set(theme1)
+bwplot(resamps, layout = c(2, 1), main="Test Set Model Performance")
+
+acc_results <- data.frame(Accuracy=c(acc_rf,acc_knn,acc_pda,acc_rda,acc_cirf), Macro_F1 = c(F1_rf,F1_knn,F1_pda,F1_rda,F1_cirf))
+rownames(acc_results) <- c("RF", "KNN", "PDA", "RDA", "CIRF")
+acc_results
+```
+\newpage
+
+# 4. Conclusion
+
+This report detailed the fitting and results of several classification models for a migraine type classification dataset. The dataset was neither large, or balanced which presented a challenge to fit an accurate model which achieved both a high accuracy and high F1 class scores on an unseen test set. There were only a small number of some of the labels in the test, which means one or two misclassifications can have a large effect on the report F1 score. To help with training the dataset was resampled to help balance the classes prior to fitting the final models. To help mitigate potential overfitting cross validation was used for all models during training. 
+
+It is not known what the relative risks are for false positives and false negatives for each of the classes in terms of patient outcome so I am not able to draw a conclusion on which model is 'best'. The RF model achieved the highest overall accuracy, but the F1 scores were more balanced, and the average F1 score was higher for the RDA model. Comparing the F1 scores for each of the classes it can be seen that each of these two models attains a higher F1 score for different classes. An ensemble model could be built using the predicted probabilities, or other criteria from each of the models to make a final classification prediction.  
