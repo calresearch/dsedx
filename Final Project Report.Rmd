@@ -1,0 +1,110 @@
+---
+title: "Capstone Project Final Report"
+author: "Craig Leavitt"
+date: "`r Sys.Date()`"
+fontsize: 12pt
+output:  
+  pdf_document: 
+    df_print: kable
+    template: default
+    toc_depth: 2
+    fig_crop: no
+    highlight: null
+editor_options: 
+  chunk_output_type: console
+header-includes:
+  \usepackage{longtable}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# 1. Introduction
+
+This report is prepared for the final capstone project of the Data Science certificate program offered by HarvardX. The report details analysis and modeling of a migraine classification dataset available for download on the Kaggle website (https://www.kaggle.com/datasets/weinoose/migraine-classification). Each observation in the dataset consists of twenty three (23) numerical variables and a final migraine type (string) classification. The dataset is rather small with only 400 observations. 
+
+## 1.1 Dataset Analysis
+
+```{r, include=FALSE}
+if (!require("dplyr")) install.packages("dplyr")
+if (!require("caret")) install.packages("caret", dependencies = c("Depends", "Suggests"))
+if (!require("gam")) install.packages("gam")
+if (!require("randomForest")) install.packages("randomForest")
+if (!require("mda")) install.packages("mda")
+if (!require("klaR")) install.packages("klaR")
+if (!require("party")) install.packages("party")
+if (!require("corrplot")) install.packages("corrplot")
+if (!require("readr")) install.packages("readr")
+if (!require("ggplot2")) install.packages("ggplot2")
+
+library(dplyr)
+library(caret)
+library(corrplot)
+library (readr)
+library(ggplot2)
+
+#Download and Load the dataset
+urlfile="https://raw.githubusercontent.com/calresearch/dsedx/main/data.csv"
+migraines<-read_csv(url(urlfile))
+```
+
+<br /> Number of Observations:
+```{r, echo=FALSE}
+#Number of training examples
+nrow(migraines)
+```
+
+<br /> Data Columns and Labels:
+```{r, echo=FALSE}
+colnames(migraines)
+unique(migraines$Type)
+```
+
+<br /> Example Observations:
+```{r, echo=FALSE}
+head(migraines)
+#Categories
+migraines <- migraines %>% group_by(Type) 
+```
+
+<br /> Data Characteristics:
+```{r, echo=FALSE}
+summary(migraines)
+```
+\newpage
+
+Variable Correlations 
+The correlation plot shows that most variables have low correlation, wiht the exceptions of Intensity - Character, and Phonophobia and Photophobia.  
+  
+  
+```{r, echo=FALSE}
+cor_var = colnames(migraines) != "Type" & colnames(migraines) != "Ataxia"
+res <- cor(migraines[cor_var])
+corrplot(res, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+```
+
+
+\newpage
+```{r, echo=FALSE}
+summary(migraines$Type)
+default_margins <- par("mar")
+new_margins <- c(12, 2.5, 2.5, 2.5)
+par(mar = new_margins)
+barplot(table(migraines$Type), main="Label Distri. of Migraines Dataset", ylab="Frequency", las=3)
+```
+\newpage
+
+## 1.2 Data Partitioning and Preparation  
+
+<br /> The dataset was partitioned into an 80/20 train test split:
+
+```{r, include=FALSE}
+set.seed(1, sample.kind="Rounding")
+
+#Partition the dataset
+test_index <- createDataPartition(y = migraines$Type, times = 1, p = 0.2, list = FALSE)
+test_set <- migraines[test_index,]
+train_set <- migraines[-test_index,]
+```
